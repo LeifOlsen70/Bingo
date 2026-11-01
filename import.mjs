@@ -21,7 +21,21 @@ export function detectGrid(tsv,width,height){
 export function detectPixelGrid({data,width,height}){
  const dark=(x,y)=>{const i=(y*width+x)*4;return data[i]*.299+data[i+1]*.587+data[i+2]*.114<170&&data[i+3]>100;};
  const bands=[];let start=-1;for(let y=0;y<height;y++){let run=0,max=0;for(let x=0;x<width;x++){run=dark(x,y)?run+1:0;if(run>max)max=run;}const hit=max>width*.22;if(hit&&start<0)start=y;if(!hit&&start>=0){bands.push((start+y-1)/2);start=-1;}}if(start>=0)bands.push((start+height-1)/2);
- for(let a=0;a<bands.length;a++)for(let b=a+1;b<bands.length;b++){const step=bands[b]-bands[a];if(step<height*.02||step>height*.2)continue;const ys=Array.from({length:6},(_,i)=>bands.find(y=>Math.abs(y-(bands[a]+i*step))<step*.045));if(ys.some(y=>y===undefined)||new Set(ys).size!==6)continue;const xs=[];let begin=-1;for(let x=0;x<width;x++){let count=0;for(let y=Math.ceil(ys[0]);y<=Math.floor(ys[5]);y++)if(dark(x,y))count++;const hit=count/(ys[5]-ys[0]+1)>.85;if(hit&&begin<0)begin=x;if(!hit&&begin>=0){xs.push((begin+x-1)/2);begin=-1;}}if(begin>=0)xs.push((begin+width-1)/2);
+ for(let a=0;a<bands.length;a++)for(let b=a+1;b<bands.length;b++){const step=bands[b]-bands[a];if(step<height*.02||step>height*.2)continue;// Paper tickets have a BINGO heading row above the five number rows.
+ // If seven horizontal grid lines are present, skip the heading row.
+ const seven=Array.from({length:7},(_,i)=>bands.find(y=>Math.abs(y-(bands[a]+i*step))<step*.08));
+ if(seven.every(y=>y!==undefined)&&new Set(seven).size===7){
+  const top=seven[1],bottom=seven[6];
+  const xs=[];let begin=-1;
+  for(let x=0;x<width;x++){let count=0;for(let y=Math.ceil(top);y<=Math.floor(bottom);y++)if(dark(x,y))count++;const hit=count/(bottom-top+1)>.78;if(hit&&begin<0)begin=x;if(!hit&&begin>=0){xs.push((begin+x-1)/2);begin=-1;}}
+  if(begin>=0)xs.push((begin+width-1)/2);
+  for(let c=0;c<xs.length;c++)for(let d=c+1;d<xs.length;d++){
+   const dx=xs[d]-xs[c];if(dx<width*.035)continue;
+   const selected=Array.from({length:6},(_,i)=>xs.find(x=>Math.abs(x-(xs[c]+i*dx))<dx*.08));
+   if(selected.every(x=>x!==undefined)&&new Set(selected).size===6)return {left:selected[0]/width,right:selected[5]/width,top:top/height,bottom:bottom/height};
+  }
+ }
+ const ys=Array.from({length:6},(_,i)=>bands.find(y=>Math.abs(y-(bands[a]+i*step))<step*.045));if(ys.some(y=>y===undefined)||new Set(ys).size!==6)continue;const xs=[];let begin=-1;for(let x=0;x<width;x++){let count=0;for(let y=Math.ceil(ys[0]);y<=Math.floor(ys[5]);y++)if(dark(x,y))count++;const hit=count/(ys[5]-ys[0]+1)>.85;if(hit&&begin<0)begin=x;if(!hit&&begin>=0){xs.push((begin+x-1)/2);begin=-1;}}if(begin>=0)xs.push((begin+width-1)/2);
  for(let c=0;c<xs.length;c++)for(let d=c+1;d<xs.length;d++){const dx=xs[d]-xs[c];if(dx<width*.035)continue;const selected=Array.from({length:6},(_,i)=>xs.find(x=>Math.abs(x-(xs[c]+i*dx))<dx*.045));if(selected.some(x=>x===undefined)||new Set(selected).size!==6)continue;return {left:selected[0]/width,right:selected[5]/width,top:ys[0]/height,bottom:ys[5]/height};}
  }return null;
 }
