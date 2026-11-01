@@ -63,7 +63,49 @@ async function readRotatedIdentifiers(){
 async function autoImport(){setBusy(true);try{$('dialogTitle').textContent='Los wird automatisch gelesen';$('progress').textContent='Bingofeld, Serien- und Losnummer werden gesucht …';await getWorker();await worker.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'11'});const {data}=await worker.recognize(image.toDataURL(),{},{text:true,tsv:true});identifiers=ticketIdentifiers(data.text);if(!identifiers.series||!identifiers.lot){$('progress').textContent='Seitliche Serien- und Losnummer werden gelesen …';await readRotatedIdentifiers();}const pixels=image.getContext('2d').getImageData(0,0,image.width,image.height);const pixelRect=detectTileGrid(pixels)||detectPixelGrid(pixels);const grid=detectGrid(data.tsv,image.width,image.height);if(pixelRect){rect=pixelRect;const cells=await readCells();showReview(cells.numbers,cells.uncertain);}else if(grid){rect=grid.rect;showReview(grid.numbers,grid.uncertain);}else{showCrop();$('progress').textContent='Das Bingofeld wurde nicht eindeutig erkannt. Grenze die 25 Zahlen ein und tippe auf „Zahlen erkennen“. '+(identifiers.series||identifiers.lot?'Die erkannten Losdaten werden übernommen.':'Serien- und Losnummer kannst du danach ergänzen.');}}catch(err){console.error('Automatischer Import fehlgeschlagen',err);if(worker){try{await worker.terminate();}catch{}worker=null;}showCrop();$('progress').textContent='Das Los konnte nicht automatisch gelesen werden. Du kannst den Zahlenbereich eingrenzen oder die Zahlen selbst eintragen.';}finally{setBusy(false);}}
 for(const id of ['seriesNumber','lotNumber'])$(id).oninput=()=>{$(id).value=$(id).value.replace(/\D/g,'');};
 
-async function readCells(){await worker.setParameters({tessedit_char_whitelist:'0123456789',tessedit_pageseg_mode:'7'});const numbers=[],uncertain=[];const crop=cropped();for(let i=0;i<25;i++){$('progress').textContent=`Zahl ${i+1} von 25 wird gelesen …`;const c=document.createElement('canvas');c.width=160;c.height=130;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);const cw=crop.width/5,ch=crop.height/5;ctx.drawImage(crop,(i%5)*cw+cw*.1,Math.floor(i/5)*ch+ch*.1,cw*.8,ch*.8,15,15,130,100);const pixels=ctx.getImageData(0,0,c.width,c.height);for(let p=0;p<pixels.data.length;p+=4){const v=pixels.data[p]*.299+pixels.data[p+1]*.587+pixels.data[p+2]*.114<150?0:255;pixels.data[p]=pixels.data[p+1]=pixels.data[p+2]=v;pixels.data[p+3]=255;}ctx.putImageData(pixels,0,0);let {data}=await worker.recognize(c.toDataURL());if(!/^\s*\d{1,2}\s*$/.test(data.text)||Number(data.text)<1||Number(data.text)>75||data.confidence<60){await worker.setParameters({tessedit_pageseg_mode:'8'});const retry=await worker.recognize(c.toDataURL());if(/^\s*\d{1,2}\s*$/.test(retry.data.text)&&Number(retry.data.text)>=1&&Number(retry.data.text)<=75&&retry.data.confidence>data.confidence)data=retry.data;await worker.setParameters({tessedit_pageseg_mode:'7'});}const raw=data.text.replace(/\s/g,'');const n=/^\d{1,2}$/.test(raw)?Number(raw):0;const col=i%5,min=col*15+1,max=min+14;const valid=n>=min&&n<=max;numbers.push(valid?n:'');if(data.confidence<80||!valid)uncertain.push(i);}return {numbers,uncertain};}
+async function readCells(){
+ const numbers=[],uncertain=[],crop=cropped(),cw=crop.width/5,ch=crop.height/5;
+ // Independently OCR the entire grid and use its word coordinates as a second opinion.
+ let fullGrid=new Map();
+ try{
+  await worker.setParameters({tessedit_char_whitelist:'0123456789',tessedit_pageseg_mode:'11'});
+  const whole=await worker.recognize(crop.toDataURL(),{},{tsv:true});
+  for(const line of (whole.data.tsv||'').split('\n').slice(1)){
+   const a=line.split('\t');if(Number(a[0])!==5)continue;
+   const raw=(a.slice(11).join('\t')||'').trim();if(!/^\d{1,2}$/.test(raw))continue;
+   const x=Number(a[6])+Number(a[8])/2,y=Number(a[7])+Number(a[9])/2;
+   const col=Math.floor(x/cw),row=Math.floor(y/ch),n=Number(raw);
+   if(col<0||col>4||row<0||row>4||n<col*15+1||n>col*15+15)continue;
+   const idx=row*5+col,arr=fullGrid.get(idx)||[];arr.push({n,confidence:Number(a[10])||0});fullGrid.set(idx,arr);
+  }
+ }catch(e){console.warn('Whole-grid fallback unavailable',e);}
+
+ for(let i=0;i<25;i++){
+  $('progress').textContent=`Zahl ${i+1} von 25 wird mehrfach geprüft …`;
+  const col=i%5,min=col*15+1,max=min+14,candidates=[...(fullGrid.get(i)||[])];
+  const make=(threshold,margin)=>{
+   const c=document.createElement('canvas');c.width=240;c.height=200;
+   const ctx=c.getContext('2d',{willReadFrequently:true});ctx.fillStyle='#fff';ctx.fillRect(0,0,240,200);
+   const sx=col*cw+cw*margin,sy=Math.floor(i/5)*ch+ch*margin;
+   ctx.drawImage(crop,sx,sy,cw*(1-2*margin),ch*(1-2*margin),20,20,200,160);
+   if(threshold){const im=ctx.getImageData(0,0,240,200);for(let p=0;p<im.data.length;p+=4){const v=.299*im.data[p]+.587*im.data[p+1]+.114*im.data[p+2];const out=v<threshold?0:255;im.data[p]=im.data[p+1]=im.data[p+2]=out;}ctx.putImageData(im,0,0);}
+   return c.toDataURL();
+  };
+  const variants=[make(0,.07),make(175,.07),make(125,.10),make(0,.15)];
+  for(let k=0;k<variants.length;k++){
+   await worker.setParameters({tessedit_char_whitelist:'0123456789',tessedit_pageseg_mode:k===0?'7':k===1?'8':k===2?'10':'13'});
+   const {data}=await worker.recognize(variants[k]);const raw=(data.text||'').replace(/[^0-9]/g,'');
+   if(/^\d{1,2}$/.test(raw)){const n=Number(raw);if(n>=min&&n<=max)candidates.push({n,confidence:data.confidence||0});}
+   if(candidates.some(x=>x.confidence>=90))break;
+  }
+  const grouped=new Map();for(const x of candidates){const g=grouped.get(x.n)||{score:0,count:0};g.score+=Math.max(0,x.confidence);g.count++;grouped.set(x.n,g);}
+  const ranked=[...grouped].sort((a,b)=>(b[1].score+15*b[1].count)-(a[1].score+15*a[1].count));
+  const best=ranked[0];numbers.push(best?best[0]:'');
+  if(!best||best[1].score/best[1].count<80||(ranked[1]&&ranked[1][1].score>best[1].score*.75))uncertain.push(i);
+ }
+ await worker.setParameters({tessedit_pageseg_mode:'7'});
+ return {numbers,uncertain};
+}
 
 // Horizontal touch gestures page through the draw board and every ticket page.
 function swipePage(direction){const count=ticketPage(tickets,page,4).count;if(view==='draw'){if(direction<0)return false;view='tickets';page=0;}else if(direction<0){if(page>0)page--;else view='draw';}else{if(page>=count-1)return false;page++;}render();const surface=view==='draw'?$('drawScreen'):tickets.length?$('play'):$('empty');if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches&&surface.animate)surface.animate([{opacity:.65,transform:`translateX(${direction*24}px)`},{opacity:1,transform:'translateX(0)'}],{duration:180,easing:'ease-out'});return true;}

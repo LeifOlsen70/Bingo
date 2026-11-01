@@ -9,3 +9,5 @@ Enthalten: Screenshot-Mehrfachauswahl, lokale Zahlen-Erkennung, Serien- und Losn
 Beim Wechsel von einer anderen Webadresse werden vorhandene Lose und Spielstände nicht automatisch übernommen. Die gespeicherten Zahlen befinden sich auf dem jeweiligen Gerät und unter der jeweiligen Webadresse.
 
 Version 11: seitliche Serien- und Losnummern werden zusätzlich gedreht gelesen; Bingo-Zahlen werden spaltenweise auf gültige Werte geprüft. Unsichere Werte bitte vor dem Speichern kontrollieren.
+
+Version 12: Mehrfach-OCR pro Feld mit verschiedenen Bildaufbereitungen und Spaltenvalidierung.
